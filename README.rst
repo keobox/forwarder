@@ -14,7 +14,7 @@ I use this script as a frontend for simple SOCKS proxy servers based on SSH like
 
 Example of use: if I have a shell opened on *myproxyhost* I can setup a SOCKS proxy listening on localhost:10080 with this command:
 
-ssh -D localhost
+ssh -D 10080 localhost
 
 And then activate the port forwarding script as frontend to this SOCKS proxy server:
 
