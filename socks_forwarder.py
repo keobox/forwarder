@@ -3,20 +3,23 @@
 
 import asyncore
 import socket
+import socks
 
 class forwarder(asyncore.dispatcher):
     "The 'accept' channel."
 
-    def __init__(self, ip, port, remoteip, remoteport, allowed_addrs, backlog=5):
+    def __init__(self, options, backlog = 5):
         "Constructor."
         asyncore.dispatcher.__init__(self)
-        self.remoteip = remoteip
-        self.remoteport = remoteport
+        self.remoteip = options['remote_ip']
+        self.remoteport = options['remote_port']
+        self.allowed_addrs = options['allowed_addrs']
+        self.targetip = options['target_ip']
+        self.targetport = options['target_port']
         self.create_socket(socket.AF_INET,socket.SOCK_STREAM)
         self.set_reuse_addr()
-        self.bind((ip, port))
+        self.bind((options['local_ip'], options['local_port']))
         self.listen(backlog)
-        self.allowed_addrs = allowed_addrs
 
     def handle_accept(self):
         "Accept handler."
@@ -24,8 +27,11 @@ class forwarder(asyncore.dispatcher):
         # print '--- Connect --- '
         # filter by IP address 0.0.0.0 allows all
         if addr[0] in self.allowed_addrs or ('0.0.0.0' in self.allowed_addrs):
-            # print "Accepting", addr[0]
-            sender(receiver(conn), self.remoteip, self.remoteport)
+            if self.targetip != '127.0.0.1':
+                socksified = socks.handshake(self.remoteip, self.remoteport, self.targetip, self.targetport)
+            else:
+                socksified = None
+            sender(receiver(conn), self.remoteip, self.remoteport, socksified)
 
 
 class receiver(asyncore.dispatcher):
@@ -66,13 +72,16 @@ class receiver(asyncore.dispatcher):
 class sender(asyncore.dispatcher):
     "Remote channel."
 
-    def __init__(self, receiver, remoteaddr, remoteport):
+    def __init__(self, receiver, remoteaddr, remoteport, sock=None):
         "Constructor."
-        asyncore.dispatcher.__init__(self)
+        if sock == None:
+            asyncore.dispatcher.__init__(self)
+            self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.connect((remoteaddr, remoteport))
+        else:
+            asyncore.dispatcher.__init__(self, sock)
         self.receiver = receiver
         receiver.sender = self
-        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.connect((remoteaddr, remoteport))
 
     def handle_connect(self):
         "Do nothing on connect."
@@ -121,8 +130,16 @@ if __name__=='__main__':
         '-a','--allowed_addrs',
         dest='allowed_addrs',default='127.0.0.1',
         help='Allowed addresses: can be a comma separated list of addresses')
+    parser.add_option(
+        '-s','--target-ip',
+        dest='target_ip',default='127.0.0.1',
+        help='Target IP address reachable through remote socks server')
+    parser.add_option(
+        '-t','--target-port',
+        type='int',dest='target_port',default=1080,
+        help='Target port reachable through remote socks server')
     options, args = parser.parse_args()
 
     allowed_addrs = options.allowed_addrs.split(',')
-    forwarder(options.local_ip,options.local_port,options.remote_ip,options.remote_port,allowed_addrs)
+    forwarder(vars(options))
     asyncore.loop()
